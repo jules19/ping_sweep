@@ -1,228 +1,300 @@
-# 🏓 Network Ping Sweep Tool
+# Enhanced Network Discovery Tool 🏓
 
-A fast, multi-threaded network discovery tool that identifies active hosts within a specified IP subnet using ICMP ping requests.
+A powerful Python-based network discovery tool that combines ping sweeping with MAC address lookup and intelligent device classification. Discover devices on your network and automatically identify their types, vendors, and hostnames.
 
-## ✨ Features
+## Features ✨
 
-- **High-Performance Scanning**: Multi-threaded execution with configurable worker threads
-- **Cross-Platform**: Works on Windows, Linux, and macOS with optimized ping commands
-- **Real-Time Feedback**: Live progress updates with response times
-- **Comprehensive Statistics**: Detailed scan results including timing and success rates  
-- **Export Functionality**: Save results to timestamped text files
-- **User-Friendly Interface**: Rich visual feedback with emojis and clear formatting
-- **Robust Error Handling**: Graceful handling of timeouts, interruptions, and invalid inputs
-- **Configurable Parameters**: Adjustable thread count and timeout values
+- **Fast Ping Sweeping**: Multi-threaded subnet scanning with configurable timeout and worker threads
+- **MAC Address Lookup**: Automatic MAC address resolution via ARP table
+- **Vendor Identification**: IEEE OUI database lookup for device manufacturer identification
+- **Device Classification**: Smart device type detection based on vendor and hostname patterns
+- **Cross-Platform**: Works on Windows, Linux, and macOS
+- **Flexible Output**: Simple or verbose output modes
+- **Export Capability**: JSON export for further analysis
+- **Auto-Updating Database**: Downloads and caches IEEE OUI database automatically
 
-## 🚀 Quick Start
+## Device Types Detected 🔍
+
+The tool can automatically classify devices into categories:
+
+- 🌐 **Network Equipment** (routers, switches, access points)
+- 📱 **Mobile Devices** (phones, tablets)
+- 💻 **Computers** (desktops, laptops)
+- 🏠 **IoT Devices** (smart home devices)
+- 🖨️ **Printers**
+- 🎮 **Gaming Consoles**
+- 📹 **Cameras**
+- ❓ **Unknown Devices**
+
+## Installation 📦
 
 ### Prerequisites
 
 - Python 3.6 or higher
-- Standard library modules (no additional dependencies required)
-- Network connectivity to target subnet
+- `requests` library for OUI database downloads
 
-### Installation
+### Install Dependencies
 
-1. Clone or download the script:
+```bash
+pip install requests
+```
+
+### Download the Script
+
 ```bash
 git clone <repository-url>
-# or download pingsweep2.py directly
+cd network-discovery-tool
 ```
 
-2. Make it executable (Unix/Linux/macOS):
-```bash
-chmod +x pingsweep2.py
-```
+Or download `pingsweep.py` directly.
+
+## Usage 🚀
 
 ### Basic Usage
 
-Run the script and follow the interactive prompts:
+```bash
+# Simple scan with minimal output
+python pingsweep.py 192.168.1.0/24
+
+# Verbose scan with detailed device information
+python pingsweep.py -v 192.168.1.0/24
+```
+
+### Advanced Options
 
 ```bash
-python pingsweep2.py
+# Custom thread count and timeout
+python pingsweep.py --workers 20 --timeout 500 192.168.1.0/24
+
+# Export results to JSON
+python pingsweep.py --export -v 10.0.0.0/24
+
+# Custom ping count
+python pingsweep.py --count 3 192.168.1.0/24
 ```
 
-**Example Session:**
+### Command Line Arguments
+
+| Argument    | Short | Description                             | Default  |
+| ----------- | ----- | --------------------------------------- | -------- |
+| `subnet`    | -     | Target subnet (e.g., 192.168.1.0/24)    | Required |
+| `--verbose` | `-v`  | Enable detailed output with device info | False    |
+| `--workers` | `-w`  | Number of worker threads                | 50       |
+| `--timeout` | `-t`  | Ping timeout in milliseconds            | 1000     |
+| `--count`   | `-c`  | Number of ping packets per host         | 1        |
+| `--export`  | -     | Export results to JSON file             | False    |
+
+## Output Examples 📊
+
+### Simple Mode Output
+
 ```
-🏓 NETWORK PING SWEEP TOOL
-========================================
-🔧 PING SWEEP CONFIGURATION
-==============================
-Enter subnet (e.g., 192.168.1.0/24): 192.168.1.0/24
+Scanning 254 hosts in 192.168.1.0/24
+IP Address      Time     Vendor
+--------------------------------------------------
+192.168.1.1     2.3ms    Cisco Systems, Inc
+192.168.1.100   15.2ms   Apple, Inc
+192.168.1.105   8.7ms    Samsung Electronics Co.,Ltd
 
-⚙️ Optional settings (press Enter for defaults):
-Max threads (default 50): 
-Timeout in ms (default 1000): 
+Scan complete: 3/254 hosts alive (12.4s)
+```
 
-🚀 Starting scan...
+### Verbose Mode Output
+
+```
+🏓 ENHANCED NETWORK DISCOVERY TOOL
+==================================================
+Features: Ping Sweep + MAC Lookup + Device Classification
+
+🚀 Starting enhanced scan...
 🔍 Scanning 254 hosts in 192.168.1.0/24
 ⚙️  Using 50 threads, 1000ms timeout
+📚 MAC vendor database loaded with 28557 entries
 
-✓ 192.168.1.1 (15.2ms)
-✓ 192.168.1.15 (23.1ms)
-✓ 192.168.1.100 (12.8ms)
-```
+✓ 192.168.1.1     (2.3ms) - 🌐 Network Equipment - Cisco Systems, Inc
+✓ 192.168.1.100   (15.2ms) - 📱 Mobile Device - Apple, Inc
+✓ 192.168.1.105   (8.7ms) - 📱 Mobile Device - Samsung Electronics Co.,Ltd
 
-## 🛠️ Configuration Options
-
-### Thread Count
-- **Default**: 50 threads
-- **Range**: 1-200 threads
-- **Recommendation**: 30-70 for most networks
-
-### Timeout
-- **Default**: 1000ms (1 second)
-- **Range**: 100-10000ms
-- **Recommendation**: 1000-3000ms for reliable results
-
-### Supported Subnet Formats
-- CIDR notation: `192.168.1.0/24`
-- Single host: `192.168.1.100/32`
-- Large subnets: `10.0.0.0/16`
-
-## 📊 Output Explanation
-
-### Real-Time Updates
-- `✓ 192.168.1.1 (15.2ms)` - Host is alive with response time
-- Silent for non-responding hosts (reduces noise)
-
-### Final Summary
-```
-==================================================
-📊 SCAN COMPLETE
-==================================================
-⏱️  Scan time: 12.34 seconds
+================================================================================
+📊 ENHANCED SCAN COMPLETE
+================================================================================
+⏱️  Scan time: 12.45 seconds
 📈 Hosts scanned: 254
-✅ Alive: 8
-❌ Down: 240
-⏰ Timeouts: 4
-🚫 Errors: 2
+✅ Alive: 3
+❌ Down: 251
 
-🌐 ALIVE HOSTS (8):
+🌐 DISCOVERED DEVICES (3):
+--------------------------------------------------------------------------------
+📍 192.168.1.1     (2.3ms)
+   🏷️  Device Type: 🌐 Network Equipment
+   🏭 Vendor: Cisco Systems, Inc
+   🔗 MAC Address: 00:0c:29:1a:2b:3c
+   🏠 Hostname: router.local
+
+📍 192.168.1.100   (15.2ms)
+   🏷️  Device Type: 📱 Mobile Device
+   🏭 Vendor: Apple, Inc
+   🔗 MAC Address: 28:f0:76:xx:xx:xx
+
+📊 DEVICE TYPE SUMMARY:
 ------------------------------
-  192.168.1.1     (15.2ms)
-  192.168.1.15    (23.1ms)
-  192.168.1.100   (12.8ms)
+   🌐 Network Equipment: 1
+   📱 Mobile Device: 2
 ```
 
-## 🎯 Use Cases
+## Technical Details 🔧
 
-### Network Discovery
-- Identify active devices on unknown networks
-- Map network topology
-- Find available IP addresses
+### MAC Address Resolution
 
-### Network Troubleshooting
-- Verify connectivity to multiple hosts
-- Identify network segments with issues
-- Test network performance across subnets
+The tool uses the system's ARP table to resolve MAC addresses for discovered devices. It supports various MAC address formats and normalizes them to a standard format.
 
-### Security & Inventory
-- Network reconnaissance (authorized testing only)
-- Asset discovery and inventory
-- Monitor network changes over time
+### OUI Database
 
-### System Administration
-- Verify DHCP lease usage
-- Check server availability across subnets
-- Network maintenance and monitoring
+- Automatically downloads IEEE OUI database on first run
+- Caches database locally for faster subsequent runs
+- Falls back to minimal built-in database if download fails
+- Updates can be forced by deleting `oui_database.json`
 
-## ⚡ Performance Tips
+### Device Classification Logic
 
-### Optimal Thread Count
-- **Small subnets** (/28, /27): 10-20 threads
-- **Medium subnets** (/24): 30-50 threads  
-- **Large subnets** (/16, /8): 50-100 threads
+Device types are determined by:
 
-### Timeout Considerations
-- **Local networks**: 500-1000ms
-- **Remote networks**: 2000-5000ms
-- **Slow networks**: 5000ms+
+1. **Vendor-based classification**: Known manufacturer patterns
+2. **Hostname analysis**: Device naming conventions
+3. **Combined heuristics**: Multiple indicators for accuracy
 
-### System Resources
-- Monitor CPU and network usage
-- Reduce threads if system becomes unresponsive
-- Consider network impact on production systems
+### Platform Support
 
-## 🔒 Security Considerations
+- **Windows**: Uses `ping -n` and `arp -a` commands
+- **Linux/macOS**: Uses `ping -c` and `arp -n` commands
+- **Cross-platform**: Automatic detection and appropriate command usage
 
-### Authorized Use Only
-- Only scan networks you own or have explicit permission to test
-- Be aware that ping sweeps may trigger security alerts
-- Some networks block ICMP traffic (firewalls, security policies)
+## Performance Considerations ⚡
 
-### Ethical Guidelines
-- Respect network policies and terms of service
-- Use appropriate timing to avoid network disruption
-- Document and justify scanning activities
+### Thread Configuration
 
-### Detection Avoidance (For Authorized Testing)
-- Use slower scan rates with higher timeouts
-- Randomize scan order (not implemented in current version)
-- Consider time-based delays between requests
+- Default: 50 threads for balanced performance
+- High-performance networks: Increase to 100+ threads
+- Limited resources: Reduce to 10-20 threads
+- Very large subnets: Consider breaking into smaller chunks
 
-## 🐛 Troubleshooting
+### Timeout Settings
+
+- Default: 1000ms (1 second)
+- Fast networks: Reduce to 200-500ms
+- Slow/congested networks: Increase to 2000-5000ms
+- Balance between speed and accuracy
+
+### Memory Usage
+
+- Minimal memory footprint
+- OUI database: ~2-3MB in memory
+- Scales linearly with discovered devices
+
+## Troubleshooting 🔧
 
 ### Common Issues
 
-**No hosts found in known active subnet:**
-- Check if ICMP/ping is blocked by firewalls
-- Verify subnet notation is correct
-- Try increasing timeout value
-- Test with a single known host first
+**Permission Errors**
 
-**Script hangs or becomes unresponsive:**
-- Reduce thread count (try 10-20)
-- Increase timeout value
-- Check system resources (CPU, memory)
+```bash
+# Linux/macOS may require elevated privileges for ARP access
+sudo python pingsweep.py 192.168.1.0/24
+```
 
-**Permission errors (Unix/Linux):**
-- Some systems require elevated privileges for ping
-- Try running with `sudo` if necessary
+**OUI Database Download Fails**
 
-**High error count:**
-- Check network connectivity
-- Verify DNS resolution isn't interfering
-- Reduce thread count to prevent overwhelming the network
+- Check internet connectivity
+- Verify firewall settings
+- Script will use minimal built-in database as fallback
 
-### Platform-Specific Notes
+**MAC Addresses Show as "N/A"**
 
-**Windows:**
-- Uses `ping -n 1 -w <timeout>` command
-- May require firewall exceptions
+- ARP table may not contain entries for all devices
+- Try scanning with higher ping count: `--count 3`
+- Some devices may not respond to ARP requests
 
-**Linux/macOS:**
-- Uses `ping -c 1 -W <timeout> -n` command
-- The `-n` flag disables DNS resolution for speed
+**Slow Performance**
 
-## 📁 File Export
+- Reduce worker threads: `--workers 20`
+- Increase timeout: `--timeout 2000`
+- Scan smaller subnets
 
-Results can be exported to timestamped text files:
-- Filename format: `ping_sweep_<subnet>_<timestamp>.txt`
-- Contains scan parameters, timestamp, and sorted results
-- Useful for documentation and comparison over time
+### Debug Mode
 
-## 🤝 Contributing
+Enable verbose mode for detailed troubleshooting:
 
-Contributions are welcome! Areas for improvement:
-- Additional ping methods (TCP, UDP)
-- Scan result comparison features
+```bash
+python pingsweep.py -v 192.168.1.0/24
+```
+
+## JSON Export Format 📄
+
+When using `--export`, results are saved in JSON format:
+
+```json
+{
+  "scan_info": {
+    "subnet": "192.168.1.0/24",
+    "scan_date": "2025-01-15 14:30:22",
+    "total_discovered": 3,
+    "verbose_mode": true
+  },
+  "devices": [
+    {
+      "ip": "192.168.1.1",
+      "response_time": 2.3,
+      "mac_address": "00:0c:29:1a:2b:3c",
+      "vendor": "Cisco Systems, Inc",
+      "device_type": "🌐 Network Equipment",
+      "hostname": "router.local"
+    }
+  ]
+}
+```
+
+## Security Considerations 🔒
+
+### Network Scanning Ethics
+
+- Only scan networks you own or have explicit permission to scan
+- Respect network policies and terms of service
+- Be aware that network scanning may trigger security alerts
+- Use responsibly and legally
+
+### Data Privacy
+
+- Tool only collects network-visible information (IP, MAC, hostname)
+- No personal data or device content is accessed
+- MAC addresses can be considered personally identifiable information
+- Export files may contain sensitive network topology information
+
+## Contributing 🤝
+
+Contributions are welcome! Areas for enhancement:
+
+- Additional device classification patterns
+- IPv6 support
+- Additional vendor databases
+- Performance optimizations
 - GUI interface
-- Advanced reporting options
-- IPv6 support enhancement
+- Network mapping features
 
-## 📄 License
+## License 📝
 
-This tool is provided for educational and authorized network administration purposes. Users are responsible for compliance with applicable laws and network policies.
+This project is licensed under the MIT License. See LICENSE file for details.
 
-## 🆘 Support
+## Changelog 📋
 
-For issues, feature requests, or questions:
-1. Check the troubleshooting section above
-2. Review your network configuration and permissions
-3. Test with a smaller subnet first
-4. Consider network security policies that might block ICMP
+### v1.0.0
+
+- Initial release with basic ping sweep functionality
+- MAC address lookup via ARP
+- IEEE OUI database integration
+- Device classification system
+- Cross-platform support
+- JSON export capability
 
 ---
 
-**⚠️ Disclaimer**: This tool should only be used on networks you own or have explicit permission to scan. Unauthorized network scanning may violate laws, regulations, or terms of service.
+**Note**: This tool is designed for network administrators and security professionals. Always ensure you have proper authorization before scanning networks.
