@@ -32,11 +32,12 @@ The tool can automatically classify devices into categories:
 
 - Python 3.6 or higher
 - `requests` library for OUI database downloads
+- `tqdm` library for progress bars
 
 ### Install Dependencies
 
 ```bash
-pip install requests
+pip install requests tqdm
 ```
 
 ### Download the Script
