@@ -10,6 +10,7 @@ import requests
 from collections import defaultdict
 import os
 import argparse
+from tqdm import tqdm
 
 # Configuration
 DEFAULT_MAX_WORKERS = 50
@@ -273,7 +274,7 @@ class EnhancedPingSweep:
         
         return None
     
-    def ping_and_analyze_host(self, ip):
+    def ping_and_analyze_host(self, ip, pbar=None):
         """Enhanced ping with MAC lookup and device classification"""
         ip_str = str(ip)
         start_time = time.time()
@@ -317,23 +318,44 @@ class EnhancedPingSweep:
                     self.alive_hosts.append(host_info)
                     self.stats['alive'] += 1
                     
-                    # Output based on verbose flag
+                    # Store results for display after progress update
                     if self.verbose:
                         # Verbose output with device info
-                        print(f"✓ {ip_str:<15} ({response_time:.1f}ms) - {device_type} - {vendor}")
+                        result_line = f"✓ {ip_str:<15} ({response_time:.1f}ms) - {device_type} - {vendor}"
                     else:
-                        # Concise output: IP, response time, vendor
-                        print(f"{ip_str:<15} {response_time:>6.1f}ms  {vendor}")
+                        # Concise output: IP, response time, vendor  
+                        result_line = f"{ip_str:<15} {response_time:>6.1f}ms  {vendor}"
+                    
+                    # Show result cleanly
+                    if self.verbose:
+                        print(result_line)
+                    else:
+                        # For non-verbose, use tqdm.write to avoid progress bar interference
+                        if pbar:
+                            pbar.write(result_line)
+                        else:
+                            print(result_line)
                     
                 else:
                     self.stats['down'] += 1
+                
+            # Update progress bar
+            if pbar:
+                pbar.update(1)
+                pbar.set_postfix(alive=self.stats['alive'], down=self.stats['down'])
                     
         except subprocess.TimeoutExpired:
             with self.lock:
                 self.stats['timeout'] += 1
+            if pbar:
+                pbar.update(1)
+                pbar.set_postfix(alive=self.stats['alive'], down=self.stats['down'])
         except Exception as e:
             with self.lock:
                 self.stats['error'] += 1
+            if pbar:
+                pbar.update(1)
+                pbar.set_postfix(alive=self.stats['alive'], down=self.stats['down'])
     
     def scan_subnet(self, subnet):
         """Scan subnet with enhanced device information"""
@@ -360,15 +382,19 @@ class EnhancedPingSweep:
         start_time = time.time()
         actual_workers = min(self.max_workers, total_hosts)
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=actual_workers) as executor:
-            futures = {executor.submit(self.ping_and_analyze_host, ip): ip for ip in network.hosts()}
+        # Use tqdm progress bar (disable in verbose mode to avoid interference)
+        with tqdm(total=total_hosts, desc="Scanning", unit="host", 
+                  disable=self.verbose, leave=True, position=0) as pbar:
             
-            for future in concurrent.futures.as_completed(futures):
-                try:
-                    future.result()
-                except Exception as e:
-                    with self.lock:
-                        self.stats['error'] += 1
+            with concurrent.futures.ThreadPoolExecutor(max_workers=actual_workers) as executor:
+                futures = {executor.submit(self.ping_and_analyze_host, ip, pbar): ip for ip in network.hosts()}
+                
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        with self.lock:
+                            self.stats['error'] += 1
         
         scan_time = time.time() - start_time
         
