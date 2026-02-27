@@ -5,6 +5,7 @@ A powerful Python-based network discovery tool that combines ping sweeping with 
 ## Features ✨
 
 - **Fast Ping Sweeping**: Multi-threaded subnet scanning with configurable timeout and worker threads
+- **Senetas Encryptor Discovery**: Fast ARP-based scan to find Senetas encryptors by MAC prefix on large subnets
 - **MAC Address Lookup**: Automatic MAC address resolution via ARP table
 - **Vendor Identification**: IEEE OUI database lookup for device manufacturer identification
 - **Device Classification**: Smart device type detection based on vendor and hostname patterns
@@ -17,6 +18,7 @@ A powerful Python-based network discovery tool that combines ping sweeping with 
 
 The tool can automatically classify devices into categories:
 
+- 🔐 **Encryptors** (Senetas network encryption appliances)
 - 🌐 **Network Equipment** (routers, switches, access points)
 - 📱 **Mobile Devices** (phones, tablets)
 - 💻 **Computers** (desktops, laptops)
@@ -40,6 +42,12 @@ The tool can automatically classify devices into categories:
 pip install requests tqdm
 ```
 
+For fast encryptor discovery mode (optional):
+
+```bash
+pip install scapy
+```
+
 ### Download the Script
 
 ```bash
@@ -59,6 +67,19 @@ python pingsweep.py 192.168.1.0/24
 
 # Verbose scan with detailed device information
 python pingsweep.py -v 192.168.1.0/24
+```
+
+### Senetas Encryptor Discovery
+
+```bash
+# Fast ARP scan to find Senetas encryptors (requires root and scapy)
+sudo python pingsweep.py --find-encryptors 192.168.1.0/24
+
+# Scan a large /16 subnet for encryptors
+sudo python pingsweep.py --find-encryptors 10.0.0.0/16
+
+# Export discovered encryptors to JSON
+sudo python pingsweep.py --find-encryptors --export 10.0.0.0/16
 ```
 
 ### Advanced Options
@@ -84,6 +105,7 @@ python pingsweep.py --count 3 192.168.1.0/24
 | `--timeout` | `-t`  | Ping timeout in milliseconds            | 1000     |
 | `--count`   | `-c`  | Number of ping packets per host         | 1        |
 | `--export`  | -     | Export results to JSON file             | False    |
+| `--find-encryptors` | - | Fast ARP scan for Senetas encryptors (requires root + scapy) | False |
 
 ## Output Examples 📊
 
@@ -152,9 +174,9 @@ The tool uses the system's ARP table to resolve MAC addresses for discovered dev
 ### OUI Database
 
 - Automatically downloads IEEE OUI database on first run
-- Caches database locally for faster subsequent runs
+- Caches database locally at `~/.config/pingsweep/oui_database.json` for faster subsequent runs
 - Falls back to minimal built-in database if download fails
-- Updates can be forced by deleting `oui_database.json`
+- Updates can be forced by deleting `~/.config/pingsweep/oui_database.json`
 
 ### Device Classification Logic
 

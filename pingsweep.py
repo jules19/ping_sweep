@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import ipaddress
 import subprocess
 import concurrent.futures
@@ -9,6 +10,7 @@ import json
 import requests
 from collections import defaultdict
 import os
+import signal
 import argparse
 from tqdm import tqdm
 
@@ -16,6 +18,7 @@ from tqdm import tqdm
 DEFAULT_MAX_WORKERS = 50
 DEFAULT_TIMEOUT = 1000
 DEFAULT_COUNT = 1
+SENETAS_OUI = "00d01f"
 
 class MACVendorLookup:
     """Handles MAC address vendor identification using multiple methods"""
@@ -27,7 +30,10 @@ class MACVendorLookup:
     
     def load_local_database(self):
         """Load IEEE OUI database from local file or download if needed"""
-        oui_file = "oui_database.json"
+        # Use XDG config directory
+        config_dir = os.path.expanduser("~/.config/pingsweep")
+        os.makedirs(config_dir, exist_ok=True)
+        oui_file = os.path.join(config_dir, "oui_database.json")
         
         if os.path.exists(oui_file):
             try:
@@ -136,7 +142,11 @@ class MACVendorLookup:
         """Classify device type based on vendor and hostname"""
         vendor_lower = vendor.lower()
         hostname_lower = (hostname or "").lower()
-        
+
+        # Encryption appliances
+        if 'senetas' in vendor_lower:
+            return "🔐 Encryptor"
+
         # Network infrastructure
         if any(keyword in vendor_lower for keyword in ['cisco', 'juniper', 'netgear', 'linksys', 'tp-link', 'asus router', 'mikrotik']):
             return "🌐 Network Equipment"
@@ -234,7 +244,7 @@ class EnhancedPingSweep:
                                 return self.normalize_mac_address(raw_mac)
             else:
                 # Unix/Linux/macOS ARP command
-                result = subprocess.run(['arp', '-n', ip], 
+                result = subprocess.run(['arp', '-n', ip],
                                       capture_output=True, text=True, timeout=5)
                 if result.returncode == 0:
                     if self.verbose:
@@ -357,52 +367,79 @@ class EnhancedPingSweep:
                 pbar.update(1)
                 pbar.set_postfix(alive=self.stats['alive'], down=self.stats['down'])
     
-    def scan_subnet(self, subnet):
+    def scan_subnet(self, subnet, use_cache=True):
         """Scan subnet with enhanced device information"""
         try:
             network = ipaddress.ip_network(subnet, strict=False)
         except ValueError as e:
             print(f"❌ Invalid subnet: {e}")
             return []
-        
+
         total_hosts = network.num_addresses - 2 if network.prefixlen < 31 else network.num_addresses
         if total_hosts <= 0:
             print("❌ No hosts to scan in this subnet")
             return []
-        
+
+        skip_ips = set()
+
+        # Cache check phase — verify previously found devices first
+        if use_cache:
+            cached = load_cache(subnet, "ping")
+            if cached:
+                cached_ips = [entry['ip'] for entry in cached]
+                print(f"Checking {len(cached_ips)} cached device(s)...")
+                cache_workers = min(len(cached_ips), self.max_workers)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=cache_workers) as executor:
+                    futures = {executor.submit(self.ping_and_analyze_host, ip): ip for ip in cached_ips}
+                    for future in concurrent.futures.as_completed(futures):
+                        try:
+                            future.result()
+                        except Exception:
+                            pass
+                skip_ips = {host['ip'] for host in self.alive_hosts}
+                if skip_ips:
+                    print(f"  {len(skip_ips)}/{len(cached_ips)} cached device(s) still alive\n")
+
+        remaining_hosts = [ip for ip in network.hosts() if str(ip) not in skip_ips]
+        remaining = len(remaining_hosts)
+
         if self.verbose:
-            print(f"🔍 Scanning {total_hosts} hosts in {subnet}")
+            print(f"🔍 Scanning {remaining} hosts in {subnet}")
             print(f"⚙️  Using {self.max_workers} threads, {self.timeout}ms timeout")
             print(f"📚 MAC vendor database loaded with {len(self.mac_lookup.oui_database)} entries\n")
         else:
-            print(f"Scanning {total_hosts} hosts in {subnet}")
+            print(f"Scanning {remaining} hosts in {subnet}")
             print(f"{'IP Address':<15} {'Time':<8} Vendor")
             print("-" * 50)
-        
+
         start_time = time.time()
-        actual_workers = min(self.max_workers, total_hosts)
-        
+        actual_workers = min(self.max_workers, remaining) if remaining > 0 else 1
+
         # Use tqdm progress bar (disable in verbose mode to avoid interference)
-        with tqdm(total=total_hosts, desc="Scanning", unit="host", 
-                  disable=self.verbose, leave=True, position=0) as pbar:
-            
-            with concurrent.futures.ThreadPoolExecutor(max_workers=actual_workers) as executor:
-                futures = {executor.submit(self.ping_and_analyze_host, ip, pbar): ip for ip in network.hosts()}
-                
-                for future in concurrent.futures.as_completed(futures):
-                    try:
-                        future.result()
-                    except Exception as e:
-                        with self.lock:
-                            self.stats['error'] += 1
-        
+        if remaining > 0:
+            with tqdm(total=remaining, desc="Scanning", unit="host",
+                      disable=self.verbose, leave=True, position=0) as pbar:
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=actual_workers) as executor:
+                    futures = {executor.submit(self.ping_and_analyze_host, ip, pbar): ip for ip in remaining_hosts}
+
+                    for future in concurrent.futures.as_completed(futures):
+                        try:
+                            future.result()
+                        except Exception as e:
+                            with self.lock:
+                                self.stats['error'] += 1
+
         scan_time = time.time() - start_time
-        
+
         if self.verbose:
             self.display_enhanced_results(scan_time, total_hosts)
         else:
             self.display_simple_results(scan_time, total_hosts)
-            
+
+        if use_cache:
+            save_cache(subnet, "ping", self.alive_hosts)
+
         return self.alive_hosts
     
     def display_simple_results(self, scan_time, total_hosts):
@@ -461,6 +498,171 @@ class EnhancedPingSweep:
         else:
             print("\n💀 No alive hosts found")
 
+def normalize_mac(mac_raw):
+    """Normalize a MAC address to 12-char lowercase hex (e.g., '00d01f098008').
+
+    Handles short-form MACs like '0:d0:1f:9:80:8' by zero-padding each octet.
+    """
+    parts = mac_raw.replace("-", ":").split(":")
+    if len(parts) == 6:
+        return "".join(p.zfill(2).lower() for p in parts)
+    # Already separator-free or unexpected format
+    clean = mac_raw.replace(":", "").replace("-", "").replace(".", "").lower()
+    return clean if len(clean) == 12 else ""
+
+
+def _cache_path(subnet, mode):
+    """Return cache file path for a subnet. Mode is 'ping' or 'encryptors'."""
+    network = ipaddress.ip_network(subnet, strict=False)
+    cache_dir = os.path.expanduser(f"~/.config/pingsweep/cache/{mode}")
+    os.makedirs(cache_dir, exist_ok=True)
+    return os.path.join(cache_dir, str(network).replace("/", "_") + ".json")
+
+
+def load_cache(subnet, mode):
+    """Load cached scan results. Returns list of dicts or []."""
+    path = _cache_path(subnet, mode)
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, 'r') as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def save_cache(subnet, mode, results):
+    """Save scan results to cache."""
+    try:
+        path = _cache_path(subnet, mode)
+        with open(path, 'w') as f:
+            json.dump(results, f, indent=2)
+    except Exception:
+        pass
+
+
+def find_encryptors(subnet, timeout=2, verbose=False, iface=None, use_cache=True):
+    """ARP sweep for Senetas encryptors (OUI 00:d0:1f).
+
+    Uses Scapy to send ARP requests and filters responses
+    for the Senetas MAC prefix. Requires root privileges.
+    """
+    from scapy.all import srp, Ether, ARP, conf
+    conf.verb = 0
+
+    network = ipaddress.ip_network(subnet, strict=False)
+    total = network.num_addresses - 2 if network.prefixlen < 31 else network.num_addresses
+
+    if total <= 0:
+        print("No hosts to scan in this subnet")
+        return []
+
+    # Auto-detect interface from Scapy's routing table if not specified
+    if iface is None:
+        first_host = str(next(network.hosts()))
+        iface, _, _ = conf.route.route(first_host)
+
+    print(f"Scanning for Senetas encryptors in {subnet} ({total} hosts) on {iface}...")
+
+    encryptors = []
+    found_ips = set()
+    srp_kwargs = {"timeout": timeout, "verbose": False}
+    if iface:
+        srp_kwargs["iface"] = iface
+
+    # Cache check phase — verify previously found encryptors first
+    if use_cache:
+        cached = load_cache(subnet, "encryptors")
+        if cached:
+            cached_ips = [e['ip'] for e in cached]
+            print(f"Checking {len(cached_ips)} previously found encryptor(s)...")
+            pkt = [Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=ip) for ip in cached_ips]
+            try:
+                ans, _ = srp(pkt, timeout=1, verbose=False,
+                             **({"iface": iface} if iface else {}))
+                for sent, received in ans:
+                    mac_norm = normalize_mac(received.hwsrc)
+                    if mac_norm[:6] == SENETAS_OUI:
+                        entry = {
+                            'ip': received.psrc,
+                            'mac': ':'.join(mac_norm[i:i+2] for i in range(0, 12, 2)),
+                        }
+                        encryptors.append(entry)
+                        found_ips.add(received.psrc)
+                        print(f"  Found (cached): {entry['ip']:<15} {entry['mac']}")
+            except Exception:
+                pass
+            if found_ips:
+                print(f"  {len(found_ips)}/{len(cached_ips)} cached encryptor(s) still alive")
+
+    # For large subnets, chunk into /24s to avoid memory issues
+    if network.prefixlen < 24:
+        chunks = list(network.subnets(new_prefix=24))
+    else:
+        chunks = [network]
+
+    # Reliable Ctrl+C: first press requests stop, second press force-quits.
+    # Scapy overrides SIGINT during srp(), so a simple flag won't work.
+    interrupted = False
+    old_handler = signal.getsignal(signal.SIGINT)
+
+    def on_sigint(signum, frame):
+        nonlocal interrupted
+        if interrupted:
+            print("\nForce quit.")
+            os._exit(1)
+        interrupted = True
+        print("\nStopping after current chunk (Ctrl+C again to force quit)...")
+
+    signal.signal(signal.SIGINT, on_sigint)
+
+    try:
+        with tqdm(total=len(chunks), desc="ARP sweep", unit="chunk",
+                  disable=verbose, leave=True) as pbar:
+            for chunk in chunks:
+                if interrupted:
+                    break
+
+                pkt = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=str(chunk))
+                try:
+                    ans, _ = srp(pkt, **srp_kwargs)
+                except KeyboardInterrupt:
+                    break
+
+                if interrupted:
+                    break
+
+                for sent, received in ans:
+                    if received.psrc in found_ips:
+                        continue
+                    mac_norm = normalize_mac(received.hwsrc)
+                    if verbose:
+                        print(f"  ARP reply: {received.psrc:<15} {received.hwsrc} (normalized: {mac_norm})")
+                    if mac_norm[:6] == SENETAS_OUI:
+                        encryptors.append({
+                            'ip': received.psrc,
+                            'mac': ':'.join(mac_norm[i:i+2] for i in range(0, 12, 2)),
+                        })
+                        found_ips.add(received.psrc)
+                        msg = f"  Found: {received.psrc:<15} {encryptors[-1]['mac']}"
+                        if pbar.disable:
+                            print(msg)
+                        else:
+                            pbar.write(msg)
+
+                pbar.update(1)
+
+            if interrupted:
+                print(f"\nScan interrupted. Scanned {pbar.n}/{len(chunks)} chunks.")
+    finally:
+        signal.signal(signal.SIGINT, old_handler)
+
+    if not interrupted and use_cache:
+        save_cache(subnet, "encryptors", encryptors)
+
+    return encryptors
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Enhanced Network Discovery Tool with MAC lookup and device classification',
@@ -470,6 +672,7 @@ Examples:
   python pingsweep.py 192.168.1.0/24
   python pingsweep.py -v 10.0.0.0/24
   python pingsweep.py --verbose --workers 20 --timeout 500 192.168.1.0/24
+  sudo python pingsweep.py --find-encryptors 10.0.0.0/16
         """
     )
     
@@ -484,9 +687,65 @@ Examples:
                        help=f'Number of ping packets per host (default: {DEFAULT_COUNT})')
     parser.add_argument('--export', action='store_true',
                        help='Export results to JSON file')
-    
+    parser.add_argument('--find-encryptors', action='store_true',
+                       help='Fast ARP scan to find Senetas encryptors by MAC prefix (requires root and scapy)')
+    parser.add_argument('--iface', type=str, default=None,
+                       help='Network interface to use for ARP scan (e.g., en8)')
+    parser.add_argument('--no-cache', action='store_true',
+                       help='Skip cached results and force a clean scan')
+
     args = parser.parse_args()
-    
+
+    # Fast encryptor discovery mode
+    if args.find_encryptors:
+        try:
+            # Root check (Unix only)
+            if sys.platform != 'win32' and os.geteuid() != 0:
+                print("Error: --find-encryptors requires root. Run with sudo.")
+                sys.exit(1)
+
+            # Dependency check
+            try:
+                from scapy.all import srp  # noqa: F401
+            except ImportError:
+                print("Error: --find-encryptors requires scapy: pip install scapy")
+                sys.exit(1)
+
+            start = time.time()
+            timeout_sec = max(1, args.timeout // 1000)
+            use_cache = not args.no_cache
+            encryptors = find_encryptors(args.subnet, timeout=timeout_sec, verbose=args.verbose, iface=args.iface, use_cache=use_cache)
+
+            if encryptors:
+                sorted_results = sorted(encryptors, key=lambda x: ipaddress.ip_address(x['ip']))
+                print(f"\nFound {len(encryptors)} encryptor(s):")
+                for e in sorted_results:
+                    print(f"  {e['ip']:<15} {e['mac']}")
+            else:
+                print("\nNo Senetas encryptors found.")
+
+            print(f"Scan complete in {time.time() - start:.1f}s")
+
+            if args.export and encryptors:
+                filename = f"encryptors_{args.subnet.replace('/', '_')}_{int(time.time())}.json"
+                with open(filename, 'w') as f:
+                    json.dump({
+                        'scan_info': {
+                            'mode': 'find-encryptors',
+                            'subnet': args.subnet,
+                            'scan_date': time.strftime('%Y-%m-%d %H:%M:%S'),
+                            'encryptors_found': len(encryptors),
+                        },
+                        'encryptors': encryptors
+                    }, f, indent=2)
+                print(f"Results exported to {filename}")
+
+        except KeyboardInterrupt:
+            print("\n\nScan interrupted by user")
+        except Exception as e:
+            print(f"\nError: {e}")
+        sys.exit(0)
+
     try:
         if args.verbose:
             print("🏓 ENHANCED NETWORK DISCOVERY TOOL")
@@ -501,7 +760,8 @@ Examples:
             count=args.count,
             verbose=args.verbose
         )
-        alive_hosts = scanner.scan_subnet(args.subnet)
+        use_cache = not args.no_cache
+        alive_hosts = scanner.scan_subnet(args.subnet, use_cache=use_cache)
         
         # Export option with enhanced data
         if args.export and alive_hosts:

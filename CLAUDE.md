@@ -28,11 +28,21 @@ Export results to JSON:
 python pingsweep.py --export -v 10.0.0.0/24
 ```
 
+Fast Senetas encryptor discovery (requires root and scapy):
+```bash
+sudo python pingsweep.py --find-encryptors 10.0.0.0/16
+```
+
 ## Dependencies
 
 The tool requires Python 3.6+ and these libraries:
 ```bash
 pip install requests tqdm
+```
+
+For `--find-encryptors` mode (optional, lazy-imported):
+```bash
+pip install scapy
 ```
 
 ## Architecture
@@ -44,15 +54,22 @@ The codebase consists of two main classes in `pingsweep.py`:
 - Stores vendor mappings in `oui_database.json` for offline use
 - Falls back to a minimal built-in database if download fails
 - Performs MAC-to-vendor lookup and device type classification
-- Classification categories: Network Equipment, Mobile Device, Computer, IoT Device, Printer, Gaming Console, Camera, Unknown Device
+- Classification categories: Encryptor, Network Equipment, Mobile Device, Computer, IoT Device, Printer, Gaming Console, Camera, Unknown Device
 
 ### EnhancedPingSweep Class
 - Multi-threaded ping sweep using `concurrent.futures.ThreadPoolExecutor`
 - Platform-specific ping commands (Windows: `ping -n`, Unix: `ping -c`)
-- ARP table lookup for MAC address resolution (`arp -a` on Windows, `arp -n` on Unix)
+- ARP table lookup for MAC address resolution (`arp -a` on Windows/macOS, `arp -n` on Linux)
 - MAC address normalization to handle various formats
 - Optional hostname resolution via `nslookup`
 - Thread-safe statistics collection and result aggregation
+
+### find_encryptors() Function
+- Fast ARP-based discovery of Senetas encryptors using Scapy
+- Filters ARP responses for OUI prefix `00:d0:1f` (SENETAS_OUI constant)
+- Chunks large subnets into /24s to manage memory
+- Requires root/admin privileges for raw socket ARP
+- Scapy is lazy-imported only when `--find-encryptors` is used
 
 ## Key Implementation Details
 
