@@ -669,10 +669,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python pingsweep.py 192.168.1.0/24
-  python pingsweep.py -v 10.0.0.0/24
-  python pingsweep.py --verbose --workers 20 --timeout 500 192.168.1.0/24
-  sudo python pingsweep.py --find-encryptors 10.0.0.0/16
+  pingsweep 192.168.1.0/24
+  pingsweep -v 10.0.0.0/24
+  pingsweep --verbose --workers 20 --timeout 500 192.168.1.0/24
+  sudo pingsweep --find-encryptors 10.0.0.0/16
+  pingsweep --last 192.168.1.0/24
         """
     )
     
@@ -691,10 +692,46 @@ Examples:
                        help='Fast ARP scan to find Senetas encryptors by MAC prefix (requires root and scapy)')
     parser.add_argument('--iface', type=str, default=None,
                        help='Network interface to use for ARP scan (e.g., en8)')
+    parser.add_argument('--last', action='store_true',
+                       help='Show results from the last sweep(s) without scanning')
     parser.add_argument('--no-cache', action='store_true',
                        help='Skip cached results and force a clean scan')
 
     args = parser.parse_args()
+
+    # Show cached results from previous sweeps
+    if args.last:
+        ping_cache = load_cache(args.subnet, "ping")
+        enc_cache = load_cache(args.subnet, "encryptors")
+
+        if not ping_cache and not enc_cache:
+            print(f"No cached results for {args.subnet}")
+            sys.exit(0)
+
+        if ping_cache:
+            cache_path = _cache_path(args.subnet, "ping")
+            mtime = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime(cache_path)))
+            sorted_hosts = sorted(ping_cache, key=lambda x: ipaddress.ip_address(x['ip']))
+            print(f"Last ping sweep of {args.subnet} ({mtime}) — {len(sorted_hosts)} host(s):")
+            for host in sorted_hosts:
+                vendor = host.get('vendor', '')
+                mac = host.get('mac_address', 'N/A')
+                parts = [host['ip']]
+                if mac != 'N/A':
+                    parts.append(mac)
+                if vendor and vendor != 'Unknown':
+                    parts.append(vendor)
+                print(f"  {parts[0]:<15} {'  '.join(parts[1:])}")
+
+        if enc_cache:
+            cache_path = _cache_path(args.subnet, "encryptors")
+            mtime = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime(cache_path)))
+            sorted_enc = sorted(enc_cache, key=lambda x: ipaddress.ip_address(x['ip']))
+            print(f"\nLast encryptor sweep of {args.subnet} ({mtime}) — {len(sorted_enc)} encryptor(s):")
+            for e in sorted_enc:
+                print(f"  {e['ip']:<15} {e['mac']}")
+
+        sys.exit(0)
 
     # Fast encryptor discovery mode
     if args.find_encryptors:
