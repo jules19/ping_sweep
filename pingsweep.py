@@ -667,17 +667,20 @@ def main():
     parser = argparse.ArgumentParser(
         description='Enhanced Network Discovery Tool with MAC lookup and device classification',
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        usage='%(prog)s [options] subnet\n       %(prog)s -l [subnet]',
         epilog="""
 Examples:
   pingsweep 192.168.1.0/24
   pingsweep -v 10.0.0.0/24
   pingsweep --verbose --workers 20 --timeout 500 192.168.1.0/24
   sudo pingsweep --find-encryptors 10.0.0.0/16
-  pingsweep --last 192.168.1.0/24
+  pingsweep -l
+  pingsweep -l 192.168.1.0/24
         """
     )
     
-    parser.add_argument('subnet', help='Subnet to scan (e.g., 192.168.1.0/24)')
+    parser.add_argument('subnet', nargs='?', default=None,
+                       help='Subnet to scan (e.g., 192.168.1.0/24)')
     parser.add_argument('-v', '--verbose', action='store_true', 
                        help='Enable verbose output with detailed device information')
     parser.add_argument('-w', '--workers', type=int, default=DEFAULT_MAX_WORKERS,
@@ -692,7 +695,7 @@ Examples:
                        help='Fast ARP scan to find Senetas encryptors by MAC prefix (requires root and scapy)')
     parser.add_argument('--iface', type=str, default=None,
                        help='Network interface to use for ARP scan (e.g., en8)')
-    parser.add_argument('--last', action='store_true',
+    parser.add_argument('-l', '--last', action='store_true',
                        help='Show results from the last sweep(s) without scanning')
     parser.add_argument('--no-cache', action='store_true',
                        help='Skip cached results and force a clean scan')
@@ -701,37 +704,65 @@ Examples:
 
     # Show cached results from previous sweeps
     if args.last:
-        ping_cache = load_cache(args.subnet, "ping")
-        enc_cache = load_cache(args.subnet, "encryptors")
+        def _show_cached(subnet_str):
+            """Display cached results for a single subnet."""
+            ping_cache = load_cache(subnet_str, "ping")
+            enc_cache = load_cache(subnet_str, "encryptors")
+            if not ping_cache and not enc_cache:
+                return False
 
-        if not ping_cache and not enc_cache:
-            print(f"No cached results for {args.subnet}")
-            sys.exit(0)
+            if ping_cache:
+                cache_path = _cache_path(subnet_str, "ping")
+                mtime = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime(cache_path)))
+                sorted_hosts = sorted(ping_cache, key=lambda x: ipaddress.ip_address(x['ip']))
+                print(f"Last ping sweep of {subnet_str} ({mtime}) — {len(sorted_hosts)} host(s):")
+                for host in sorted_hosts:
+                    vendor = host.get('vendor', '')
+                    mac = host.get('mac_address', 'N/A')
+                    parts = [host['ip']]
+                    if mac != 'N/A':
+                        parts.append(mac)
+                    if vendor and vendor != 'Unknown':
+                        parts.append(vendor)
+                    print(f"  {parts[0]:<15} {'  '.join(parts[1:])}")
 
-        if ping_cache:
-            cache_path = _cache_path(args.subnet, "ping")
-            mtime = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime(cache_path)))
-            sorted_hosts = sorted(ping_cache, key=lambda x: ipaddress.ip_address(x['ip']))
-            print(f"Last ping sweep of {args.subnet} ({mtime}) — {len(sorted_hosts)} host(s):")
-            for host in sorted_hosts:
-                vendor = host.get('vendor', '')
-                mac = host.get('mac_address', 'N/A')
-                parts = [host['ip']]
-                if mac != 'N/A':
-                    parts.append(mac)
-                if vendor and vendor != 'Unknown':
-                    parts.append(vendor)
-                print(f"  {parts[0]:<15} {'  '.join(parts[1:])}")
+            if enc_cache:
+                cache_path = _cache_path(subnet_str, "encryptors")
+                mtime = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime(cache_path)))
+                sorted_enc = sorted(enc_cache, key=lambda x: ipaddress.ip_address(x['ip']))
+                print(f"\nLast encryptor sweep of {subnet_str} ({mtime}) — {len(sorted_enc)} encryptor(s):")
+                for e in sorted_enc:
+                    print(f"  {e['ip']:<15} {e['mac']}")
+            return True
 
-        if enc_cache:
-            cache_path = _cache_path(args.subnet, "encryptors")
-            mtime = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime(cache_path)))
-            sorted_enc = sorted(enc_cache, key=lambda x: ipaddress.ip_address(x['ip']))
-            print(f"\nLast encryptor sweep of {args.subnet} ({mtime}) — {len(sorted_enc)} encryptor(s):")
-            for e in sorted_enc:
-                print(f"  {e['ip']:<15} {e['mac']}")
-
+        if args.subnet:
+            if not _show_cached(args.subnet):
+                print(f"No cached results for {args.subnet}")
+        else:
+            # List all cached results
+            cache_base = os.path.expanduser("~/.config/pingsweep/cache")
+            found = False
+            subnets_shown = set()
+            for mode in ("ping", "encryptors"):
+                mode_dir = os.path.join(cache_base, mode)
+                if not os.path.isdir(mode_dir):
+                    continue
+                for fname in sorted(os.listdir(mode_dir)):
+                    if fname.endswith(".json"):
+                        subnet_str = fname[:-5].replace("_", "/")
+                        if subnet_str not in subnets_shown:
+                            if found:
+                                print()
+                            if _show_cached(subnet_str):
+                                found = True
+                            subnets_shown.add(subnet_str)
+            if not found:
+                print("No cached results found.")
         sys.exit(0)
+
+    # Subnet is required for all modes except --last
+    if not args.subnet:
+        parser.error("the following arguments are required: subnet")
 
     # Fast encryptor discovery mode
     if args.find_encryptors:
